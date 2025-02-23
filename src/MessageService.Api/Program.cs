@@ -1,41 +1,107 @@
+using MessageService.Dal;
+using MessageService.Api;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Http;
+using System.Net.WebSockets;
+using System.Text.Json;
+using System.Text;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using Microsoft.OpenApi.Models;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+string connectionString = "Host=db;Port=5432;Database=messagesdb;Username=user;Password=password";
+
+builder.Services.AddSingleton<IMessageRepository>(sp => new MessageRepository(connectionString));
+builder.Services.AddControllers();
+builder.Services.AddSingleton<WebSocketHandler>();
+
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins("http://localhost:8081")
+              .AllowAnyMethod() 
+              .AllowAnyHeader(); 
+    });
+});
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Message Service API",
+        Version = "v1",
+        Description = "Simple message service with WebSocket",
+        Contact = new OpenApiContact
+        {
+            Name = "Dmitriy Balakshin",
+            Email = "nazerudb@gmail.com",
+            Url = new Uri("https://github.com/nazeru")
+        }
+    });
+});
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+app.UseSwagger();
+app.UseSwaggerUI(options =>
 {
-    app.MapOpenApi();
-}
+    options.SwaggerEndpoint("/swagger/v1/swagger.json", "Message Service API v1");
+    options.RoutePrefix = "swagger"; 
+});
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
+app.Use(async (context, next) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var stopwatch = Stopwatch.StartNew();
+    await next();
+    stopwatch.Stop();
 
-app.MapGet("/weatherforecast", () =>
+    var logMessage = $"{context.Connection.RemoteIpAddress} - [{DateTime.UtcNow:dd/MMM/yyyy:HH:mm:ss zzz}] " +
+                     $"\"{context.Request.Method} {context.Request.Path} {context.Request.Protocol}\" " +
+                     $"{context.Response.StatusCode} {stopwatch.ElapsedMilliseconds}ms";
+
+    logger.LogInformation(logMessage);
+});
+
+app.UseCors();
+
+app.UseRouting();
+app.UseEndpoints(endpoints =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+    endpoints.MapControllers();
+});
+app.UseWebSockets();
 
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path == "/ws")
+    {
+        if (context.WebSockets.IsWebSocketRequest)
+        {
+            using var webSocket = await context.WebSockets.AcceptWebSocketAsync();
+            var webSocketHandler = app.Services.GetRequiredService<WebSocketHandler>();
+            logger.LogInformation($"{context.Connection.RemoteIpAddress} - WebSocket-connection successfully");
+            await webSocketHandler.HandleConnection(webSocket);
+        }
+        else
+        {
+            context.Response.StatusCode = 400;
+            logger.LogWarning($"{context.Connection.RemoteIpAddress} - Error: WebSocket-connection with HTTP");
+        }
+    }
+    else
+    {
+        await next(context);
+    }
+
+});
+
+logger.LogInformation("API is running!");
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}

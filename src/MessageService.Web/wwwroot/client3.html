@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>История сообщений</title>
+</head>
+<body>
+    <h1>История сообщений (последние 10 минут)</h1>
+    <ul id="messagesList"></ul>
+
+    <script>
+        async function loadMessages() {
+            const now = new Date();
+            const tenMinutesAgo = new Date(now - 10 * 60000);
+
+            const from = tenMinutesAgo.toISOString();
+            const to = now.toISOString();
+
+            try {
+                const response = await fetch(`http://localhost:8080/api/v1/messages/history?from=${from}&to=${to}`);
+                const data = await response.json();
+
+                if (!Array.isArray(data)) {
+                    console.error("Ошибка API:", data);
+                    return;
+                }
+
+                const messagesList = document.getElementById("messagesList");
+                messagesList.innerHTML = "";
+
+                data.forEach(msg => {
+                    const li = document.createElement("li");
+                    li.textContent = `${msg.timestamp} - ${msg.text} - ${msg.messageId}`;
+                    messagesList.appendChild(li);
+                });
+            } catch (error) {
+                console.error("Ошибка загрузки сообщений:", error);
+            }
+        }
+
+        loadMessages();
+    </script>
+</body>
+</html>

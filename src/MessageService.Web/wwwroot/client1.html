@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Отправка сообщений</title>
+</head>
+<body>
+    <h1>Отправка сообщений</h1>
+    <input type="text" id="messageInput" placeholder="Введите сообщение">
+    <button onclick="sendMessage()">Отправить</button>
+
+    <script>
+        async function sendMessage() {
+            const messageText = document.getElementById("messageInput").value.trim();
+            if (!messageText) return alert("Введите сообщение!");
+
+            const message = {
+                text: messageText,
+                messageId: Math.floor(Math.random() * 1000)
+            };
+
+            await fetch("http://localhost:8080/api/v1/messages", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(message)
+            });
+
+            document.getElementById("messageInput").value = "";
+        }
+    </script>
+</body>
+</html>
